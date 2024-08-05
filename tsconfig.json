@@ -1,0 +1,37 @@
+{
+    "include": [
+        "src",
+        "scripts"
+    ],
+    "exclude": [
+        "src/common/dist"
+    ],
+    "extends": "@tsconfig/node20/tsconfig.json",
+    "compilerOptions": {
+        "allowJs": true,
+        // "exactOptionalPropertyTypes": false,
+        "module": "CommonJS",
+        "moduleResolution": "node",
+        "newLine": "lf",
+        "noEmitOnError": true,
+        "noFallthroughCasesInSwitch": true,
+        "noImplicitOverride": true,
+        "noImplicitReturns": true,
+        "noUncheckedIndexedAccess": true,
+        "noUnusedLocals": true,
+        "noUnusedParameters": true,
+        "outDir": "dist",
+        "pretty": true,
+        "strict": true,
+        "strictNullChecks": true,
+        "stripInternal": true,
+        "useDefineForClassFields": true,
+        // Following two options ensure Typescript helpers are included explicitly from tslib dependency package.
+        // Needed for Sentry source mapping, see: https://docs.sentry.io/platforms/node/typescript/#dealing-with-tslib
+        "noEmitHelpers": true,
+        "importHelpers": true
+    },
+    "ts-node": {
+        "files": true
+    }
+}
