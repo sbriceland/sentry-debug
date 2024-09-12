@@ -1,35 +1,14 @@
-import * as Sentry from '@sentry/node';
-import bodyParser from 'body-parser';
-import express, { Application, NextFunction, Request, Response, Router } from 'express';
+import { initializedSentry as Sentry } from './sentry';
 
-const DSN = process.env.SENTRY_DSN;
-
-Sentry.init({
-    dsn: DSN,
-    beforeSend: (event, hint, ...args) => {
-        const { type, contexts, exception, extra, tags, message, user, request } = event;
-        console.dir(
-            {
-                whoami: 'sentry:beforeSend',
-                event: { type, contexts, exception, extra, tags, message, user, request },
-                hint,
-                args,
-            },
-            { depth: null }
-        );
-        return event;
-    },
-    release: 'sentry-scope-testing',
-    environment: 'local',
-    skipOpenTelemetrySetup: true,
-});
+import * as bodyParser from 'body-parser';
+import express, { Application, RequestHandler, Router } from 'express';
 
 const app: Application = express();
 
-const router = Router();
+const apiRouter = Router();
 
-router.use(bodyParser.urlencoded({ extended: true, limit: '500kb' }));
-router.use(bodyParser.json({ limit: '500kb' }));
+apiRouter.use(bodyParser.urlencoded({ extended: true, limit: '500kb' }));
+apiRouter.use(bodyParser.json({ limit: '500kb' }));
 
 const Users: { id: string; email: string; name: string }[] = [
     { id: '1', email: 'foo@example.com', name: 'foo example' },
@@ -40,50 +19,64 @@ const Users: { id: string; email: string; name: string }[] = [
 
 const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-router.use('/users', function (req, res, next) {
-    try {
-        const reqUser = Users.find((u) => u.id === req.headers['authorization']);
-        if (reqUser) {
-            Sentry.setTag('Authenticated', true);
-            Sentry.setUser(reqUser);
-            const randomNum = Math.floor(Math.random() * 3000);
-            sleep(randomNum).then(() => {
-                Sentry.withScope((scope) => {
-                    // extras will include correct User.
-                    // This allows a reference point to check the reported Issue User and the Additional Data reqUser
-                    // Our tests confirm that this is often wrong when the api is dealing with requests in parallel
-                    scope.setExtras({ reqUser, randomNum });
-                    Sentry.captureMessage('sentry-scope-testing!');
-                });
-                res.json(Users);
-            });
-        } else {
-            throw new Error('Authentication Error');
-        }
-    } catch (err) {
-        next(err);
+/**
+ * Example auth middleware
+ * - Assign the user to Sentry for each request
+ */
+const auth: RequestHandler = (req, res, next) => {
+    const authUser = Users.find((u) => u.id === req.headers['authorization']);
+    if (!authUser) {
+        Sentry.setTag('Authenticated', false);
+        Sentry.setTag('UserID', null);
+        Sentry.setUser(null);
+        next(new Error('Authentication Error'));
+    } else {
+        Sentry.setTag('Authenticated', true);
+        Sentry.setTag('UserID', authUser.id);
+        Sentry.setUser(authUser);
+        res.locals.authUser = authUser;
+        next();
     }
+};
+
+const userRouter = Router();
+
+userRouter.route('').get((_req, res, next) => {
+    const randomNum = Math.floor(Math.random() * 1000);
+    sleep(randomNum)
+        .then(() => {
+            Sentry.captureException(new Error('capturing exception..'), {
+                // `extra.expectedUser` should match `event.user`
+                // `extra.expectedUser.id` should match `event.tags.UserId`
+                extra: { expectedUser: res.locals.authUser },
+            });
+            res.json(Users);
+        })
+        .catch(next);
 });
 
-app.use('/api', router);
+apiRouter.use('/users', [auth, userRouter]);
 
-app.use(function (err: Error, req: Request, res: Response, next: NextFunction) {
-    const { method, originalUrl, params, query, body } = req;
-    const { statusCode, locals } = res;
+app.use('/api', apiRouter);
 
-    Sentry.withScope((scope) => {
-        scope.setExtras({
-            request: { method, originalUrl, params, query, body },
-            response: { statusCode, locals },
+app.use([
+    (err, req, res, next) => {
+        const { method, originalUrl, params, query, body } = req;
+        const { statusCode, locals } = res;
+
+        const eventId = Sentry.captureException(err, {
+            extra: {
+                request: { method, originalUrl, params, query, body },
+                response: { statusCode, locals },
+            },
         });
-        const eventId = Sentry.captureException(err);
         (res as { sentry?: string }).sentry = eventId;
-    });
 
-    if (!res.headersSent) res.status(500).json({ errorMessage: 'Oops!' });
+        if (!res.headersSent) res.status(500).json({ errorMessage: 'Oops!' });
 
-    next(err);
-});
+        next(err);
+    },
+]);
 
 // Or just use this, which is identical to above, without `extras`
 // Sentry.setupExpressErrorHandler(app);
