@@ -25,18 +25,20 @@ const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve,
  */
 const auth: RequestHandler = (req, res, next) => {
     const authUser = Users.find((u) => u.id === req.headers['authorization']);
-    if (!authUser) {
-        Sentry.setTag('Authenticated', false);
-        Sentry.setTag('UserID', null);
-        Sentry.setUser(null);
-        next(new Error('Authentication Error'));
-    } else {
-        Sentry.setTag('Authenticated', true);
-        Sentry.setTag('UserID', authUser.id);
-        Sentry.setUser(authUser);
-        res.locals.authUser = authUser;
-        next();
-    }
+    Sentry.withIsolationScope(() => {
+        if (!authUser) {
+            Sentry.setTag('Authenticated', false);
+            Sentry.setTag('UserID', null);
+            Sentry.setUser(null);
+            next(new Error('Authentication Error'));
+        } else {
+            Sentry.setTag('Authenticated', true);
+            Sentry.setTag('UserID', authUser.id);
+            Sentry.setUser(authUser);
+            res.locals.authUser = authUser;
+            next();
+        }
+    });
 };
 
 const userRouter = Router();
