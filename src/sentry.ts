@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/node';
-import { SentryPropagator, SentrySampler } from '@sentry/opentelemetry';
+import { SentryPropagator } from '@sentry/opentelemetry';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -49,7 +49,6 @@ diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG)
 
 console.log('sentryClient is defined:', !!sentryClient);
 const provider = new NodeTracerProvider({
-    sampler: new SentrySampler(sentryClient!),
 });
 
 provider.addSpanProcessor(
@@ -71,6 +70,7 @@ registerInstrumentations({
     instrumentations: [new ExpressInstrumentation()],
 });
 
-Sentry.validateOpenTelemetrySetup();
+// No need to validate if we do not care about tracing etc.
+// Sentry.validateOpenTelemetrySetup();
 
 export const initializedSentry = Sentry;
