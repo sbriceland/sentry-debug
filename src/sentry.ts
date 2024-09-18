@@ -1,24 +1,22 @@
 import * as Sentry from '@sentry/node';
-import { SentryPropagator, SentrySampler } from '@sentry/opentelemetry';
+import { SentryPropagator } from '@sentry/opentelemetry';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
 import { ExpressInstrumentation } from '@opentelemetry/instrumentation-express';
-import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
+ import { diag, DiagConsoleLogger, DiagLogLevel } from '@opentelemetry/api';
 
 const release = 'sentry-scope-testing';
 const environment = 'local';
 
 const sentryClient = Sentry.init({
-    dsn: process.env.SENTRY_DSN,
-    beforeSend: (event, hint, ...args) => {
-        const { contexts, exception, extra, tags, message, user } = event;
+    dsn: process.env.SENTRY_DSN || 'https://b5f29bfe807c4898b0f4a155c797c936@o447951.ingest.us.sentry.io/4505583202074624',
+    beforeSend: (event) => {
+        const {  extra, tags,  user } = event;
         console.dir(
             {
                 whoami: 'sentry:beforeSend',
-                event: { contexts, exception, extra, tags, message, user },
-                hint,
-                args,
+                event: { extra, tags,  user },
             },
             { depth: null }
         );
@@ -27,8 +25,10 @@ const sentryClient = Sentry.init({
     release,
     environment,
     skipOpenTelemetrySetup: true,
-    tracesSampleRate: 1.0,
+    debug: true
 });
+
+diag.setLogger(new DiagConsoleLogger(), DiagLogLevel.DEBUG)
 
 // NOTE: using a custom Sampler as per Sentry's documentation produces same results; Scope is NOT isolated per async
 // requests. Setting tags & user bleed into the wrong events
@@ -49,7 +49,6 @@ const sentryClient = Sentry.init({
 
 console.log('sentryClient is defined:', !!sentryClient);
 const provider = new NodeTracerProvider({
-    sampler: new SentrySampler(sentryClient!),
 });
 
 provider.addSpanProcessor(
@@ -66,10 +65,12 @@ provider.register({
     contextManager: new Sentry.SentryContextManager(),
 });
 
+
 registerInstrumentations({
-    instrumentations: [new ExpressInstrumentation(), new HttpInstrumentation()],
+    instrumentations: [new ExpressInstrumentation()],
 });
 
-Sentry.validateOpenTelemetrySetup();
+// No need to validate if we do not care about tracing etc.
+// Sentry.validateOpenTelemetrySetup();
 
 export const initializedSentry = Sentry;
