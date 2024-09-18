@@ -1,4 +1,4 @@
-import { initializedSentry as Sentry } from './sentry';
+import { setTag, setUser, captureException } from './sentry';
 
 import * as bodyParser from 'body-parser';
 import express, { Application, RequestHandler, Router } from 'express';
@@ -19,26 +19,35 @@ const Users: { id: string; email: string; name: string }[] = [
 
 const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/** use this to set unique tags to confirm they don't bleed into subsequent request scopes */
+let requestId = 1;
+
 /**
  * Example auth middleware
  * - Assign the user to Sentry for each request
  */
 const auth: RequestHandler = (req, res, next) => {
+    requestId = requestId + 1;
+    res.locals.requestId = requestId;
     const authUser = Users.find((u) => u.id === req.headers['authorization']);
-    Sentry.withIsolationScope(() => {
-        if (!authUser) {
-            Sentry.setTag('Authenticated', false);
-            Sentry.setTag('UserID', null);
-            Sentry.setUser(null);
-            next(new Error('Authentication Error'));
-        } else {
-            Sentry.setTag('Authenticated', true);
-            Sentry.setTag('UserID', authUser.id);
-            Sentry.setUser(authUser);
-            res.locals.authUser = authUser;
-            next();
-        }
-    });
+    if (!authUser) {
+        setTag(`Authenticated-${requestId}`, false);
+        setTag(`UserID-${requestId}`, null);
+        setUser(null);
+        const randomNum = Math.floor(Math.random() * 1000);
+        sleep(randomNum)
+            .then(() => {
+                next(new Error('Authentication Error'));
+            })
+            .catch(next);
+    } else {
+        setTag(`Authenticated-${requestId}`, true);
+        setTag(`UserID-${requestId}`, authUser.id);
+        setUser(authUser);
+
+        res.locals.authUser = authUser;
+        next();
+    }
 };
 
 const userRouter = Router();
@@ -47,10 +56,10 @@ userRouter.route('').get((_req, res, next) => {
     const randomNum = Math.floor(Math.random() * 1000);
     sleep(randomNum)
         .then(() => {
-            Sentry.captureException(new Error('capturing exception..'), {
+            captureException(new Error('capturing exception..'), {
                 // `extra.expectedUser` should match `event.user`
                 // `extra.expectedUser.id` should match `event.tags.UserId`
-                extra: { expectedUser: res.locals.authUser },
+                extra: { expectedUser: res.locals.authUser, expectedRequestId: res.locals.requestId },
             });
             res.json(Users);
         })
@@ -63,10 +72,11 @@ app.use('/api', apiRouter);
 
 app.use([
     (err, req, res, next) => {
+        if (!res.headersSent) res.status(500).json({ errorMessage: 'Oops!' });
+
         const { method, originalUrl, params, query, body } = req;
         const { statusCode, locals } = res;
-
-        const eventId = Sentry.captureException(err, {
+        const eventId = captureException(err, {
             extra: {
                 request: { method, originalUrl, params, query, body },
                 response: { statusCode, locals },
@@ -74,14 +84,9 @@ app.use([
         });
         (res as { sentry?: string }).sentry = eventId;
 
-        if (!res.headersSent) res.status(500).json({ errorMessage: 'Oops!' });
-
         next(err);
     },
 ]);
-
-// Or just use this, which is identical to above, without `extras`
-// Sentry.setupExpressErrorHandler(app);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
