@@ -1,3 +1,6 @@
+import { TelemetryInfo } from './sentry.init';
+console.log({TelemetryInfo})
+
 import { setTag, setUser, captureException } from './sentry';
 
 import * as bodyParser from 'body-parser';
@@ -20,7 +23,7 @@ const Users: { id: string; email: string; name: string }[] = [
 const sleep = async (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** use this to set unique tags to confirm they don't bleed into subsequent request scopes */
-let requestId = 1;
+let requestId = 0;
 
 /**
  * Example auth middleware
@@ -33,7 +36,6 @@ const auth: RequestHandler = (req, res, next) => {
     if (!authUser) {
         setTag(`Authenticated-${requestId}`, false);
         setTag(`UserID-${requestId}`, null);
-        setUser(null);
         const randomNum = Math.floor(Math.random() * 1000);
         sleep(randomNum)
             .then(() => {
